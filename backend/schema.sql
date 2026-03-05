@@ -8,3 +8,12 @@ CREATE TABLE IF NOT EXISTS water_demand (
     rainfall_mm FLOAT,
     is_holiday BOOLEAN
 );
+
+-- Table to store ML predictions
+CREATE TABLE IF NOT EXISTS predictions (
+    id SERIAL PRIMARY KEY,
+    date DATE NOT NULL,
+    zone_id VARCHAR(50) NOT NULL,
+    predicted_demand FLOAT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);

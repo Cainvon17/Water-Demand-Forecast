@@ -1,52 +1,72 @@
-const fs= require("fs");
+const fs = require("fs");
 const path = require("path");
 const csv = require("csv-parser");
-const { Pool } = require("pg");
 require("dotenv").config();
 
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT
-});
+const db = require("./db");
 
-const CSV_FILE = path.join(__dirname,"data","water_demand.csv");
+const CSV_FILE = path.join(__dirname, "data", "water_demand.csv");
 
-async function seed_database(){
-    const client = await pool.connect();
-    const rows = [];
+async function seed_database() {
+  const rows = [];
 
-    fs.createReadStream(CSV_FILE)
-        .pipe(csv())
-        .on("data",(data) => {
-            rows.push([
-                data.date,
-                data.zone_id,
-                parseFloat(data.demand_liters),
-                parseInt(data.population),
-                parseFloat(data.avg_temp_c),
-                parseFloat(data.rainfall_mm),
-                data.is_holiday === "true" || data.is_holiday === "1"
-            ]);
+  try {
+    // Ensure table exists if schema helper exists
+    if (typeof db.ensureSchema === "function") {
+      await db.ensureSchema();
+    }
+
+    // Read CSV
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(CSV_FILE)
+        .pipe(csv()) // comma-separated CSV
+        .on("data", (data) => {
+          rows.push({
+            date: data.date,
+            zone_id: data.zone_id,
+            demand_liters: parseFloat(data.demand_liters),
+            population: parseInt(data.population),
+            avg_temp_c: parseFloat(data.avg_temp_c),
+            rainfall_mm: parseFloat(data.rainfall_mm),
+            is_holiday:
+              data.is_holiday === "true" || data.is_holiday === "1",
+          });
         })
-        .on("end", async() => {
-            try{
-                const query = "INSERT INTO water_demand(date,zone_id,demand_liters,population,avg_temp_c,rainfall_mm,is_holiday) VALUES ($1,$2,$3,$4,$5,$6,$7)";
-                for (const row of rows) {
-                    await client.query(query, row);
-                }
-                console.log("Database seeding completed!");
-            }
-            catch (err) {
-                console.error("Seeding error:", err);
-            } finally {
-                client.release();
-                pool.end();
-            }
-        });
+        .on("end", resolve)
+        .on("error", reject);
+    });
+
+    console.log(`Read ${rows.length} rows from CSV`);
+
+    // Clear existing data to avoid duplicates
+    await db.query("DELETE FROM water_demand");
+
+    // Insert rows
+    for (const r of rows) {
+      await db.query(
+        `INSERT INTO water_demand
+        (date, zone_id, demand_liters, population, avg_temp_c, rainfall_mm, is_holiday)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          r.date,
+          r.zone_id,
+          r.demand_liters,
+          r.population,
+          r.avg_temp_c,
+          r.rainfall_mm,
+          r.is_holiday,
+        ]
+      );
+    }
+
+    console.log("✅ Database seeding completed!");
+  } catch (err) {
+    console.error("❌ Seeding error:", err.message || err);
+  } finally {
+    if (typeof db.close === "function") {
+      await db.close();
+    }
+  }
 }
 
 seed_database();
-
